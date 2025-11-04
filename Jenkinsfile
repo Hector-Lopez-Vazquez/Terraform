@@ -19,6 +19,16 @@ pipeline {
             }
         }
         
+        stage('Debug Workspace') {
+            steps {
+                sh '''
+                    echo "=== Mostrando contenido completo del workspace ==="
+                    pwd
+                    ls -R
+                '''
+            }
+        }
+ 
         stage('Build') {
             steps {
                 sh 'docker-compose -f docker-compose.test.yml build --no-cache'
