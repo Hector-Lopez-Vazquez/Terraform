@@ -42,4 +42,4 @@ def test_valid_email():
 def test_health_check(client):
     """Test básico de salud de la aplicación"""
     response = client.get('/login')
-    assert response.status_code == 200
+    assert response.status_code == 200 
