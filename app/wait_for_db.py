@@ -39,4 +39,3 @@ while True:
             print(f"⏳ Intento {attempt}, {elapsed:.1f}s: {str(e)}")
         
         time.sleep(2)  # Aumentar sleep a 2 segundos
-
