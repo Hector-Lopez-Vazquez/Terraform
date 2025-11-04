@@ -9,14 +9,15 @@ services:
       MYSQL_USER: appuser
       MYSQL_PASSWORD: apppassword
     volumes:
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - mysql-data:/var/lib/mysql   # Volumen Docker, fuera del workspace
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     networks:
       - test-network
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 5s
       timeout: 5s
-      retries: 20
+      retries: 10
       start_period: 10s
 
   test-redis:
@@ -27,7 +28,7 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
-      retries: 10
+      retries: 5
       start_period: 5s
 
   test-web:
@@ -51,6 +52,9 @@ services:
     command: >
       sh -c "python wait_for_db.py --host test-mysql --port 3306 --user appuser --password apppassword --database appdb --timeout 60 &&
              python -m pytest tests/ -v"
+
+volumes:
+  mysql-data:
 
 networks:
   test-network:
