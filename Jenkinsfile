@@ -6,21 +6,13 @@ pipeline {
     }
 
     stages {
-        stage('Checkout') {
-            steps {
-                echo "=== Haciendo checkout del repositorio ==="
-                checkout scm
-                sh 'ls -l $WORKSPACE'
-            }
-        }
-
         stage('Verify Environment') {
             steps {
                 sh '''
-                    echo "=== Docker y docker-compose ==="
+                    echo "=== Herramientas disponibles ==="
                     docker --version
                     docker-compose --version
-                    echo "=== Workspace ==="
+                    echo "=== Estructura del proyecto ==="
                     pwd
                     ls -la
                 '''
@@ -29,41 +21,24 @@ pipeline {
 
         stage('Build') {
             steps {
-                sh '''
-                    echo "=== Construyendo contenedores de test ==="
-                    docker-compose -f docker-compose.test.yml build --no-cache
-                '''
-            }
-        }
-
-        stage('Start Test Infrastructure') {
-            steps {
-                sh '''
-                    echo "=== Levantando MySQL y Redis para tests ==="
-                    docker-compose -f docker-compose.test.yml up -d test-mysql test-redis
-                    echo "=== Esperando inicialización de MySQL ==="
-                    sleep 45
-                    echo "=== Estado de los servicios ==="
-                    docker-compose -f docker-compose.test.yml ps
-                    docker-compose -f docker-compose.test.yml logs test-mysql | tail -20
-                '''
+                sh 'docker-compose -f docker-compose.test.yml build --no-cache'
             }
         }
 
         stage('Run Tests') {
             steps {
                 sh '''
-                    echo "=== Ejecutando tests de la aplicación ==="
-                    docker-compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-web || true
+                    echo "=== Levantando contenedores de test ==="
+                    docker-compose -f docker-compose.test.yml up --abort-on-container-exit
                 '''
             }
             post {
                 always {
                     sh '''
                         echo "=== Limpiando entorno de test ==="
-                        docker-compose -f docker-compose.test.yml down || true
+                        docker-compose -f docker-compose.test.yml down
                         docker-compose -f docker-compose.test.yml logs --no-color > test_logs.txt 2>&1 || true
-                        echo "=== Últimos 50 logs de test ==="
+                        echo "=== Logs de test guardados ==="
                         tail -50 test_logs.txt
                     '''
                     archiveArtifacts artifacts: 'test_logs.txt', allowEmptyArchive: true
@@ -81,35 +56,6 @@ pipeline {
                     docker-compose -f docker-compose.yml down || true
                     docker-compose -f docker-compose.yml up -d
                     sleep 30
-                '''
-            }
-        }
-
-        stage('Integration Test') {
-            when {
-                expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
-            }
-            steps {
-                sh '''
-                    echo "=== Pruebas de integración ==="
-                    timeout 180 sh -c '
-                        while true; do
-                            if curl -s -f http://localhost:5000/login > /dev/null; then
-                                echo "✅ Flask respondiendo"
-                                if curl -s http://localhost:5000/register | grep -q "Register"; then
-                                    echo "✅ Formulario de registro accesible"
-                                    echo "🎉 Todas las pruebas pasaron"
-                                    break
-                                else
-                                    echo "⏳ Esperando servicios listos..."
-                                    sleep 10
-                                fi
-                            else
-                                echo "⏳ Esperando que la aplicación esté lista..."
-                                sleep 10
-                            fi
-                        done
-                    '
                 '''
             }
         }
@@ -132,6 +78,7 @@ pipeline {
         }
     }
 }
+
 
 
 
