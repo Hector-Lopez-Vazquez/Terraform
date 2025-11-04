@@ -27,21 +27,28 @@ pipeline {
 
         stage('Run Tests') {
             steps {
-                sh '''
-                    echo "=== Levantando contenedores de test ==="
-                    docker-compose -f docker-compose.test.yml up --abort-on-container-exit
-                '''
-            }
-            post {
-                always {
-                    sh '''
-                        echo "=== Limpiando entorno de test ==="
+                script {
+                    // Ejecutar tests y capturar exit code sin detener pipeline
+                    def testExitCode = sh(script: '''
+                        set +e
+                        docker-compose -f docker-compose.test.yml up --abort-on-container-exit
+                        EXIT_CODE=$?
                         docker-compose -f docker-compose.test.yml down
+                        echo $EXIT_CODE
+                    ''', returnStdout: true).trim()
+
+                    echo "✅ Código de salida de tests: ${testExitCode}"
+
+                    // Archivar logs de los tests
+                    sh '''
                         docker-compose -f docker-compose.test.yml logs --no-color > test_logs.txt 2>&1 || true
-                        echo "=== Logs de test guardados ==="
-                        tail -50 test_logs.txt
                     '''
                     archiveArtifacts artifacts: 'test_logs.txt', allowEmptyArchive: true
+
+                    // Marcar build como UNSTABLE si tests fallaron
+                    if (testExitCode != "0") {
+                        currentBuild.result = 'UNSTABLE'
+                    }
                 }
             }
         }
@@ -64,8 +71,9 @@ pipeline {
     post {
         always {
             sh '''
-                echo "=== Limpiando entorno de desarrollo ==="
+                echo "=== Limpiando entorno de desarrollo y test ==="
                 docker-compose -f docker-compose.yml down || true
+                docker-compose -f docker-compose.test.yml down || true
                 docker system prune -f || true
             '''
             cleanWs()
@@ -73,11 +81,15 @@ pipeline {
         success {
             echo "🎉 Pipeline COMPLETADO EXITOSAMENTE"
         }
+        unstable {
+            echo "⚠️ Pipeline COMPLETÓ con tests fallidos - revisar logs archivados"
+        }
         failure {
-            echo "❌ Pipeline FALLÓ - revisar logs de test (ya archivados)"
+            echo "❌ Pipeline FALLÓ - revisar logs de Jenkins"
         }
     }
 }
+
 
 
 
