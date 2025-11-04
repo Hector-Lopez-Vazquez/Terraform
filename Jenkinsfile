@@ -29,12 +29,12 @@ pipeline {
             steps {
                 sh '''
                     echo "=== Iniciando solo MySQL y Redis para tests ==="
-                    docker-compose -f docker-compose.test.yml up -d test-mysql test-redis
+                    docker-compose -f Terraform/docker-compose.test.yml up -d test-mysql test-redis
                     echo "=== Esperando 45 segundos para inicialización de MySQL ==="
                     sleep 45
                     echo "=== Verificando estado de los servicios ==="
-                    docker-compose -f docker-compose.test.yml ps
-                    docker-compose -f docker-compose.test.yml logs test-mysql | tail -20
+                    docker-compose -f Terraform/docker-compose.test.yml ps
+                    docker-compose -f Terraform/docker-compose.test.yml logs test-mysql | tail -20
                 '''
             }
         }
@@ -44,16 +44,16 @@ pipeline {
                 sh '''
                     echo "=== Ejecutando tests con aplicación ==="
                     # Iniciar solo el servicio web que ejecutará los tests
-                    docker-compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-web
+                    docker-compose -f Terraform/docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-web
                 '''
             }
             post {
                 always {
                     sh '''
                         echo "=== Limpiando entorno de test ==="
-                        docker-compose -f docker-compose.test.yml down
+                        docker-compose -f Terraform/docker-compose.test.yml down
                         # Guardar logs para diagnóstico
-                        docker-compose -f docker-compose.test.yml logs --no-color > test_logs.txt 2>&1 || true
+                        docker-compose -f Terraform/docker-compose.test.yml logs --no-color > test_logs.txt 2>&1 || true
                         echo "=== Logs de test guardados ==="
                         cat test_logs.txt | tail -50
                     '''
@@ -125,10 +125,11 @@ pipeline {
             echo "❌ Pipeline FALLÓ - Revisar logs de test"
             sh '''
                 echo "=== Últimos logs de MySQL ==="
-                docker-compose -f docker-compose.test.yml logs test-mysql | tail -30 || true
+                docker-compose -f Terraform/docker-compose.test.yml logs test-mysql | tail -30 || true
                 echo "=== Últimos logs de Test Web ==="
-                docker-compose -f docker-compose.test.yml logs test-web | tail -30 || true
+                docker-compose -f Terraform/docker-compose.test.yml logs test-web | tail -30 || true
             '''
         }
     }
 }
+
