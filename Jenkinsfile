@@ -1,132 +1,80 @@
 pipeline {
     agent any
-    
+
     environment {
-        DOCKER_HOST = "unix:///var/run/docker.sock"
+        COMPOSE_FILE = "docker-compose.test.yml"
     }
-    
+
     stages {
-        stage('Verify Environment') {
+        stage('Preparar') {
             steps {
-                sh '''
-                    echo "=== Herramientas disponibles ==="
-                    docker --version
-                    docker-compose --version
-                    echo "=== Estructura del proyecto ==="
-                    pwd
-                    ls -la
-                '''
+                echo "🛠 Limpiando workspace..."
+                deleteDir()
             }
         }
 
-        stage('Build') {
+        stage('Levantar servicios') {
             steps {
-                sh 'docker-compose -f docker-compose.test.yml build --no-cache'
+                echo "🚀 Levantando contenedores de test..."
+                sh """
+                    docker-compose -f $COMPOSE_FILE down -v
+                    docker-compose -f $COMPOSE_FILE up -d
+                """
             }
         }
 
-        stage('Start Test Infrastructure') {
+        stage('Esperar servicios') {
             steps {
-                sh '''
-                    echo "=== Iniciando MySQL y Redis para tests ==="
-                    docker-compose -f docker-compose.test.yml up -d test-mysql test-redis
-                    echo "=== Esperando 30 segundos para inicialización de MySQL ==="
-                    sleep 30
-                    echo "=== Verificando estado de los servicios ==="
-                    docker-compose -f docker-compose.test.yml ps
-                    docker-compose -f docker-compose.test.yml logs test-mysql | tail -20
-                '''
+                echo "⏳ Esperando que MySQL y Redis estén listos..."
+                sh """
+                    # Esperar MySQL
+                    docker-compose -f $COMPOSE_FILE exec -T test-mysql \
+                        bash -c 'until mysqladmin ping -h localhost --silent; do sleep 2; done'
+                    
+                    # Esperar Redis
+                    docker-compose -f $COMPOSE_FILE exec -T test-redis \
+                        bash -c 'until redis-cli ping | grep PONG; do sleep 2; done'
+                """
             }
         }
 
-        stage('Run Tests') {
+        stage('Ejecutar tests') {
             steps {
-                sh '''
-                    echo "=== Ejecutando tests con test-web ==="
-                    docker-compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-web
-                '''
-            }
-            post {
-                always {
-                    sh '''
-                        echo "=== Limpiando contenedores de test ==="
-                        docker-compose -f docker-compose.test.yml down || true
-                        docker-compose -f docker-compose.test.yml logs --no-color > test_logs.txt 2>&1 || true
-                        echo "=== Logs de test guardados ==="
-                        tail -50 test_logs.txt
-                    '''
-                    archiveArtifacts artifacts: 'test_logs.txt', allowEmptyArchive: true
-                }
+                echo "🧪 Ejecutando tests de Flask..."
+                sh """
+                    docker-compose -f $COMPOSE_FILE exec -T test-web \
+                        python -m pytest tests/ -v
+                """
             }
         }
 
-        stage('Deploy to Development') {
-            when {
-                expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
-            }
+        stage('Logs finales') {
             steps {
-                sh '''
-                    echo "=== Desplegando entorno de desarrollo ==="
-                    docker-compose -f docker-compose.yml down || true
-                    docker-compose -f docker-compose.yml up -d
-                    sleep 20
-                '''
-            }
-        }
+                echo "📋 Últimos logs de MySQL"
+                sh "docker-compose -f $COMPOSE_FILE logs test-mysql | tail -30"
 
-        stage('Integration Test') {
-            when {
-                expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
-            }
-            steps {
-                sh '''
-                    echo "=== Realizando pruebas de integración ==="
-                    timeout time: 90, unit: 'SECONDS' {
-                        while true; do
-                            if curl -s -f http://localhost:5000/login > /dev/null; then
-                                echo "✅ Aplicación Flask respondiendo"
-                                
-                                if curl -s http://localhost:5000/register | grep -q "Register"; then
-                                    echo "✅ Formulario de registro accesible"
-                                    echo "🎉 Todas las pruebas pasaron correctamente"
-                                    break
-                                else
-                                    echo "⏳ Esperando que todos los servicios estén listos..."
-                                    sleep 10
-                                fi
-                            else
-                                echo "⏳ Esperando que la aplicación esté lista..."
-                                sleep 10
-                            fi
-                        done
-                    }
-                '''
+                echo "📋 Últimos logs de Test Web"
+                sh "docker-compose -f $COMPOSE_FILE logs test-web | tail -30"
             }
         }
     }
-    
+
     post {
         always {
-            sh '''
-                echo "=== Limpiando contenedores de desarrollo ==="
-                docker-compose -f docker-compose.yml down || true
-                docker system prune -f || true
-            '''
+            echo "🧹 Limpiando contenedores..."
+            sh "docker-compose -f $COMPOSE_FILE down -v"
         }
+
         success {
-            echo "🎉 Pipeline COMPLETADO EXITOSAMENTE"
+            echo "✅ Pipeline completado exitosamente"
         }
+
         failure {
-            echo "❌ Pipeline FALLÓ - revisar logs de Jenkins"
-            sh '''
-                echo "=== Últimos logs de MySQL ==="
-                docker-compose -f docker-compose.test.yml logs test-mysql | tail -30 || true
-                echo "=== Últimos logs de Test Web ==="
-                docker-compose -f docker-compose.test.yml logs test-web | tail -30 || true
-            '''
+            echo "❌ Pipeline FALLÓ - revisar logs"
         }
     }
 }
+
 
 
 
