@@ -48,14 +48,18 @@ pipeline {
             }
             post {
                 always {
-                    sh '''
-                        echo "=== Limpiando entorno de test ==="
-                        docker-compose -f docker-compose.test.yml down
-                        docker-compose -f docker-compose.test.yml logs --no-color > test_logs.txt 2>&1 || true
-                        echo "=== Logs de test guardados ==="
-                        tail -50 test_logs.txt
-                    '''
-                    archiveArtifacts artifacts: 'test_logs.txt', allowEmptyArchive: true
+                    script {
+                        node {
+                            sh '''
+                                echo "=== Limpiando entorno de test ==="
+                                docker-compose -f docker-compose.test.yml down
+                                docker-compose -f docker-compose.test.yml logs --no-color > test_logs.txt 2>&1 || true
+                                echo "=== Logs de test guardados ==="
+                                tail -50 test_logs.txt
+                            '''
+                            archiveArtifacts artifacts: 'test_logs.txt', allowEmptyArchive: true
+                        }
+                    }
                 }
             }
         }
@@ -107,27 +111,36 @@ pipeline {
     
     post {
         always {
-            sh '''
-                echo "=== Limpiando entorno de desarrollo ==="
-                docker-compose -f docker-compose.yml down || true
-                docker system prune -f || true
-            '''
-            cleanWs()
+            script {
+                node {
+                    sh '''
+                        echo "=== Limpiando entorno de desarrollo ==="
+                        docker-compose -f docker-compose.yml down || true
+                        docker system prune -f || true
+                    '''
+                    cleanWs()
+                }
+            }
         }
         success {
             echo "🎉 Pipeline COMPLETADO EXITOSAMENTE"
         }
         failure {
-            echo "❌ Pipeline FALLÓ - Revisar logs de test"
-            sh '''
-                echo "=== Últimos logs de MySQL ==="
-                docker-compose -f docker-compose.test.yml logs test-mysql | tail -30 || true
-                echo "=== Últimos logs de Test Web ==="
-                docker-compose -f docker-compose.test.yml logs test-web | tail -30 || true
-            '''
+            script {
+                node {
+                    echo "❌ Pipeline FALLÓ - Revisar logs de test"
+                    sh '''
+                        echo "=== Últimos logs de MySQL ==="
+                        docker-compose -f docker-compose.test.yml logs test-mysql | tail -30 || true
+                        echo "=== Últimos logs de Test Web ==="
+                        docker-compose -f docker-compose.test.yml logs test-web | tail -30 || true
+                    '''
+                }
+            }
         }
     }
 }
+
 
 
 
