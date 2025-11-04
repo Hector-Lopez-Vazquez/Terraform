@@ -1,10 +1,10 @@
 pipeline {
     agent any
-
+    
     environment {
         DOCKER_HOST = "unix:///var/run/docker.sock"
     }
-
+    
     stages {
         stage('Verify Environment') {
             steps {
@@ -25,30 +25,37 @@ pipeline {
             }
         }
 
+        stage('Start Test Infrastructure') {
+            steps {
+                sh '''
+                    echo "=== Iniciando MySQL y Redis para tests ==="
+                    docker-compose -f docker-compose.test.yml up -d test-mysql test-redis
+                    echo "=== Esperando 30 segundos para inicialización de MySQL ==="
+                    sleep 30
+                    echo "=== Verificando estado de los servicios ==="
+                    docker-compose -f docker-compose.test.yml ps
+                    docker-compose -f docker-compose.test.yml logs test-mysql | tail -20
+                '''
+            }
+        }
+
         stage('Run Tests') {
             steps {
-                script {
-                    // Ejecutar tests y capturar exit code sin detener pipeline
-                    def testExitCode = sh(script: '''
-                        set +e
-                        docker-compose -f docker-compose.test.yml up --abort-on-container-exit
-                        EXIT_CODE=$?
-                        docker-compose -f docker-compose.test.yml down
-                        echo $EXIT_CODE
-                    ''', returnStdout: true).trim()
-
-                    echo "✅ Código de salida de tests: ${testExitCode}"
-
-                    // Archivar logs de los tests
+                sh '''
+                    echo "=== Ejecutando tests con test-web ==="
+                    docker-compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-web
+                '''
+            }
+            post {
+                always {
                     sh '''
+                        echo "=== Limpiando contenedores de test ==="
+                        docker-compose -f docker-compose.test.yml down || true
                         docker-compose -f docker-compose.test.yml logs --no-color > test_logs.txt 2>&1 || true
+                        echo "=== Logs de test guardados ==="
+                        tail -50 test_logs.txt
                     '''
                     archiveArtifacts artifacts: 'test_logs.txt', allowEmptyArchive: true
-
-                    // Marcar build como UNSTABLE si tests fallaron
-                    if (testExitCode != "0") {
-                        currentBuild.result = 'UNSTABLE'
-                    }
                 }
             }
         }
@@ -62,30 +69,61 @@ pipeline {
                     echo "=== Desplegando entorno de desarrollo ==="
                     docker-compose -f docker-compose.yml down || true
                     docker-compose -f docker-compose.yml up -d
-                    sleep 30
+                    sleep 20
+                '''
+            }
+        }
+
+        stage('Integration Test') {
+            when {
+                expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
+            }
+            steps {
+                sh '''
+                    echo "=== Realizando pruebas de integración ==="
+                    timeout time: 90, unit: 'SECONDS' {
+                        while true; do
+                            if curl -s -f http://localhost:5000/login > /dev/null; then
+                                echo "✅ Aplicación Flask respondiendo"
+                                
+                                if curl -s http://localhost:5000/register | grep -q "Register"; then
+                                    echo "✅ Formulario de registro accesible"
+                                    echo "🎉 Todas las pruebas pasaron correctamente"
+                                    break
+                                else
+                                    echo "⏳ Esperando que todos los servicios estén listos..."
+                                    sleep 10
+                                fi
+                            else
+                                echo "⏳ Esperando que la aplicación esté lista..."
+                                sleep 10
+                            fi
+                        done
+                    }
                 '''
             }
         }
     }
-
+    
     post {
         always {
             sh '''
-                echo "=== Limpiando entorno de desarrollo y test ==="
+                echo "=== Limpiando contenedores de desarrollo ==="
                 docker-compose -f docker-compose.yml down || true
-                docker-compose -f docker-compose.test.yml down || true
                 docker system prune -f || true
             '''
-            cleanWs()
         }
         success {
             echo "🎉 Pipeline COMPLETADO EXITOSAMENTE"
         }
-        unstable {
-            echo "⚠️ Pipeline COMPLETÓ con tests fallidos - revisar logs archivados"
-        }
         failure {
             echo "❌ Pipeline FALLÓ - revisar logs de Jenkins"
+            sh '''
+                echo "=== Últimos logs de MySQL ==="
+                docker-compose -f docker-compose.test.yml logs test-mysql | tail -30 || true
+                echo "=== Últimos logs de Test Web ==="
+                docker-compose -f docker-compose.test.yml logs test-web | tail -30 || true
+            '''
         }
     }
 }
