@@ -3,6 +3,7 @@ pipeline {
     
     environment {
         DOCKER_HOST = "unix:///var/run/docker.sock"
+        COMPOSE_IMAGE = "docker/compose:2.20.2"
     }
     
     stages {
@@ -15,10 +16,8 @@ pipeline {
         stage('Verify Environment') {
             steps {
                 sh '''
-                    echo "=== Herramientas disponibles ==="
-                    docker --version
-                    docker-compose --version
-                    echo "=== Estructura del proyecto ==="
+                    echo "=== Herramientas disponibles dentro del contenedor Docker Compose ==="
+                    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ${COMPOSE_IMAGE} version
                     pwd
                     ls -la
                 '''
@@ -27,7 +26,12 @@ pipeline {
 
         stage('Build') {
             steps {
-                sh 'docker-compose -f docker-compose.test.yml build --no-cache'
+                sh '''
+                    docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        -v $PWD:$PWD -w $PWD \
+                        ${COMPOSE_IMAGE} -f docker-compose.test.yml build --no-cache
+                '''
             }
         }
 
@@ -35,49 +39,47 @@ pipeline {
             steps {
                 sh '''
                     echo "=== Iniciando solo MySQL y Redis para tests ==="
-                    docker-compose -f docker-compose.test.yml up -d test-mysql test-redis
+                    docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        -v $PWD:$PWD -w $PWD \
+                        ${COMPOSE_IMAGE} -f docker-compose.test.yml up -d test-mysql test-redis
                     echo "=== Esperando 45 segundos para inicialización de MySQL ==="
                     sleep 45
                     echo "=== Verificando estado de los servicios ==="
-                    docker-compose -f docker-compose.test.yml ps
-                    docker-compose -f docker-compose.test.yml logs test-mysql | tail -20
+                    docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        -v $PWD:$PWD -w $PWD \
+                        ${COMPOSE_IMAGE} -f docker-compose.test.yml ps
                 '''
             }
         }
 
         stage('Run Tests') {
             steps {
-                script {
-                    try {
-                        sh '''
-                            echo "=== Ejecutando tests con aplicación ==="
-                            docker-compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-web
-                        '''
-                    } catch (err) {
-                        echo "❌ Tests fallaron. Guardando logs antes de limpiar..."
-                        sh '''
-                            echo "=== Últimos logs de MySQL ==="
-                            docker-compose -f docker-compose.test.yml logs test-mysql | tail -30 || true
-                            echo "=== Últimos logs de Test Web ==="
-                            docker-compose -f docker-compose.test.yml logs test-web | tail -30 || true
-                        '''
-                        writeFile file: 'test_logs.txt', text: sh(script: 'docker-compose -f docker-compose.test.yml logs --no-color', returnStdout: true)
-                        archiveArtifacts artifacts: 'test_logs.txt', allowEmptyArchive: true
-                        throw err
-                    }
-                }
+                sh '''
+                    echo "=== Ejecutando tests con aplicación ==="
+                    docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        -v $PWD:$PWD -w $PWD \
+                        ${COMPOSE_IMAGE} -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-web || true
+                '''
             }
             post {
                 always {
-                    script {
-                        node {
-                            sh '''
-                                echo "=== Limpiando entorno de test ==="
-                                docker-compose -f docker-compose.test.yml down || true
-                                docker system prune -f || true
-                            '''
-                        }
-                    }
+                    sh '''
+                        echo "=== Limpiando entorno de test ==="
+                        docker run --rm \
+                            -v /var/run/docker.sock:/var/run/docker.sock \
+                            -v $PWD:$PWD -w $PWD \
+                            ${COMPOSE_IMAGE} -f docker-compose.test.yml down || true
+                        docker run --rm \
+                            -v /var/run/docker.sock:/var/run/docker.sock \
+                            -v $PWD:$PWD -w $PWD \
+                            ${COMPOSE_IMAGE} -f docker-compose.test.yml logs --no-color > test_logs.txt 2>&1 || true
+                        echo "=== Logs de test guardados ==="
+                        tail -50 test_logs.txt
+                    '''
+                    archiveArtifacts artifacts: 'test_logs.txt', allowEmptyArchive: true
                 }
             }
         }
@@ -89,8 +91,14 @@ pipeline {
             steps {
                 sh '''
                     echo "=== Desplegando entorno de desarrollo ==="
-                    docker-compose -f docker-compose.yml down || true
-                    docker-compose -f docker-compose.yml up -d
+                    docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        -v $PWD:$PWD -w $PWD \
+                        ${COMPOSE_IMAGE} -f docker-compose.yml down || true
+                    docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        -v $PWD:$PWD -w $PWD \
+                        ${COMPOSE_IMAGE} -f docker-compose.yml up -d
                     sleep 30
                 '''
             }
@@ -103,11 +111,10 @@ pipeline {
             steps {
                 sh '''
                     echo "=== Realizando pruebas de integración ==="
-                    timeout time: 90, unit: 'SECONDS', activity: true {
+                    timeout 90 sh -c '
                         while true; do
                             if curl -s -f http://localhost:5000/login > /dev/null; then
                                 echo "✅ Aplicación Flask respondiendo"
-                                
                                 if curl -s http://localhost:5000/register | grep -q "Register"; then
                                     echo "✅ Formulario de registro accesible"
                                     echo "🎉 Todas las pruebas pasaron correctamente"
@@ -121,7 +128,7 @@ pipeline {
                                 sleep 10
                             fi
                         done
-                    }
+                    '
                 '''
             }
         }
@@ -129,16 +136,15 @@ pipeline {
     
     post {
         always {
-            script {
-                node {
-                    sh '''
-                        echo "=== Limpiando entorno de desarrollo ==="
-                        docker-compose -f docker-compose.yml down || true
-                        docker system prune -f || true
-                    '''
-                    cleanWs()
-                }
-            }
+            sh '''
+                echo "=== Limpiando entorno de desarrollo ==="
+                docker run --rm \
+                    -v /var/run/docker.sock:/var/run/docker.sock \
+                    -v $PWD:$PWD -w $PWD \
+                    ${COMPOSE_IMAGE} -f docker-compose.yml down || true
+                docker system prune -f || true
+            '''
+            cleanWs()
         }
         success {
             echo "🎉 Pipeline COMPLETADO EXITOSAMENTE"
