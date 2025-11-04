@@ -47,10 +47,25 @@ pipeline {
 
         stage('Run Tests') {
             steps {
-                sh '''
-                    echo "=== Ejecutando tests con aplicación ==="
-                    docker-compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-web
-                '''
+                script {
+                    try {
+                        sh '''
+                            echo "=== Ejecutando tests con aplicación ==="
+                            docker-compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-web
+                        '''
+                    } catch (err) {
+                        echo "❌ Tests fallaron. Guardando logs antes de limpiar..."
+                        sh '''
+                            echo "=== Últimos logs de MySQL ==="
+                            docker-compose -f docker-compose.test.yml logs test-mysql | tail -30 || true
+                            echo "=== Últimos logs de Test Web ==="
+                            docker-compose -f docker-compose.test.yml logs test-web | tail -30 || true
+                        '''
+                        writeFile file: 'test_logs.txt', text: sh(script: 'docker-compose -f docker-compose.test.yml logs --no-color', returnStdout: true)
+                        archiveArtifacts artifacts: 'test_logs.txt', allowEmptyArchive: true
+                        throw err
+                    }
+                }
             }
             post {
                 always {
@@ -58,12 +73,9 @@ pipeline {
                         node {
                             sh '''
                                 echo "=== Limpiando entorno de test ==="
-                                docker-compose -f docker-compose.test.yml down
-                                docker-compose -f docker-compose.test.yml logs --no-color > test_logs.txt 2>&1 || true
-                                echo "=== Logs de test guardados ==="
-                                tail -50 test_logs.txt
+                                docker-compose -f docker-compose.test.yml down || true
+                                docker system prune -f || true
                             '''
-                            archiveArtifacts artifacts: 'test_logs.txt', allowEmptyArchive: true
                         }
                     }
                 }
@@ -132,20 +144,11 @@ pipeline {
             echo "🎉 Pipeline COMPLETADO EXITOSAMENTE"
         }
         failure {
-            script {
-                node {
-                    echo "❌ Pipeline FALLÓ - Revisar logs de test"
-                    sh '''
-                        echo "=== Últimos logs de MySQL ==="
-                        docker-compose -f docker-compose.test.yml logs test-mysql | tail -30 || true
-                        echo "=== Últimos logs de Test Web ==="
-                        docker-compose -f docker-compose.test.yml logs test-web | tail -30 || true
-                    '''
-                }
-            }
+            echo "❌ Pipeline FALLÓ - revisar logs de test (ya archivados)"
         }
     }
 }
+
 
 
 
