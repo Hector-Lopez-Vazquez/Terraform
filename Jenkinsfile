@@ -92,7 +92,7 @@ pipeline {
             steps {
                 sh '''
                     echo "=== Pruebas de integración ==="
-                    timeout 90 sh -c '
+                    timeout 180 sh -c '
                         while true; do
                             if curl -s -f http://localhost:5000/login > /dev/null; then
                                 echo "✅ Flask respondiendo"
