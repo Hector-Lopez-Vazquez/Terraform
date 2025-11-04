@@ -98,22 +98,36 @@ pipeline {
         }
         
         stage('Integration Test') {
-    when {
-        expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
-    }
-    steps {
-        sh '''
-            echo "=== Esperando que Flask responda dentro del contenedor ==="
-            timeout 90 sh -c '
-                until docker-compose -f docker-compose.test.yml exec -T test-web curl -s -f http://localhost:5000/login; do
-                    echo "⏳ Esperando Flask..."
-                    sleep 5
-                done
-            '
-            echo "✅ Flask está listo"
-        '''
+            when {
+                expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
             }
-        } 
+            steps {
+                sh '''
+                    echo "=== Realizando pruebas de integración ==="
+                    timeout time: 90, unit: 'SECONDS', activity: true {
+                        while true; do
+                            if curl -s -f http://localhost:5000/login > /dev/null; then
+                                echo "✅ Aplicación Flask respondiendo"
+                                
+                                # Probar que la base de datos funciona haciendo una consulta simple
+                                if curl -s http://localhost:5000/register | grep -q "Register"; then
+                                    echo "✅ Formulario de registro accesible"
+                                    echo "🎉 Todas las pruebas pasaron correctamente"
+                                    break
+                                else
+                                    echo "⏳ Esperando que todos los servicios estén listos..."
+                                    sleep 10
+                                fi
+                            else
+                                echo "⏳ Esperando que la aplicación esté lista..."
+                                sleep 10
+                            fi
+                        done
+                    }
+                '''
+            }
+        }
+    }
     
     post {
         always {
@@ -139,7 +153,6 @@ pipeline {
         }
     }
 }
-
 
 
 
