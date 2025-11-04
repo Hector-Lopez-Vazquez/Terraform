@@ -112,8 +112,8 @@ pipeline {
             '
             echo "✅ Flask está listo"
         '''
-    }
-}
+            }
+        } 
     
     post {
         always {
