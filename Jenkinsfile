@@ -6,27 +6,6 @@ pipeline {
     }
     
     stages {
-        stage('Checkout Code') {
-            steps {
-                checkout scm
-                sh '''
-                    echo "=== Verificando archivos después del checkout ==="
-                    pwd
-                    ls -la
-                    echo "=== Verificando docker-compose.test.yml ==="
-                    if [ -f "docker-compose.test.yml" ]; then
-                        echo "✅ docker-compose.test.yml encontrado"
-                        cat docker-compose.test.yml | head -20
-                    else
-                        echo "❌ ERROR: docker-compose.test.yml NO encontrado"
-                        echo "Archivos YML disponibles:"
-                        find . -name "*.yml" -o -name "*.yaml"
-                        exit 1
-                    fi
-                '''
-            }
-        }
-        
         stage('Verify Environment') {
             steps {
                 sh '''
@@ -36,13 +15,15 @@ pipeline {
                     echo "=== Estructura del proyecto ==="
                     pwd
                     ls -la
+                    echo "=== Contenido de Terraform ==="
+                    ls -la Terraform || true
                 '''
             }
         }
         
         stage('Build') {
             steps {
-                sh 'docker-compose build --no-cache'
+                sh 'docker-compose -f Terraform/docker-compose.test.yml build --no-cache'
             }
         }
         
@@ -50,12 +31,12 @@ pipeline {
             steps {
                 sh '''
                     echo "=== Iniciando solo MySQL y Redis para tests ==="
-                    docker-compose -f docker-compose.test.yml up -d test-mysql test-redis
+                    docker-compose -f Terraform/docker-compose.test.yml up -d test-mysql test-redis
                     echo "=== Esperando 45 segundos para inicialización de MySQL ==="
                     sleep 45
                     echo "=== Verificando estado de los servicios ==="
-                    docker-compose -f docker-compose.test.yml ps
-                    docker-compose -f docker-compose.test.yml logs test-mysql | tail -20
+                    docker-compose -f Terraform/docker-compose.test.yml ps
+                    docker-compose -f Terraform/docker-compose.test.yml logs test-mysql | tail -20
                 '''
             }
         }
@@ -64,21 +45,19 @@ pipeline {
             steps {
                 sh '''
                     echo "=== Ejecutando tests con aplicación ==="
-                    # Iniciar solo el servicio web que ejecutará los tests
-                    docker-compose -f docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-web
+                    docker-compose -f Terraform/docker-compose.test.yml up --abort-on-container-exit --exit-code-from test-web
                 '''
             }
             post {
                 always {
                     sh '''
                         echo "=== Limpiando entorno de test ==="
-                        docker-compose -f docker-compose.test.yml down
-                        # Guardar logs para diagnóstico
-                        docker-compose -f docker-compose.test.yml logs --no-color > test_logs.txt 2>&1 || true
+                        docker-compose -f Terraform/docker-compose.test.yml down
+                        docker-compose -f Terraform/docker-compose.test.yml logs --no-color > Terraform/test_logs.txt 2>&1 || true
                         echo "=== Logs de test guardados ==="
-                        cat test_logs.txt | tail -50
+                        tail -50 Terraform/test_logs.txt
                     '''
-                    archiveArtifacts artifacts: 'test_logs.txt', allowEmptyArchive: true
+                    archiveArtifacts artifacts: 'Terraform/test_logs.txt', allowEmptyArchive: true
                 }
             }
         }
@@ -90,8 +69,8 @@ pipeline {
             steps {
                 sh '''
                     echo "=== Desplegando entorno de desarrollo ==="
-                    docker-compose down || true
-                    docker-compose up -d
+                    docker-compose -f Terraform/docker-compose.yml down || true
+                    docker-compose -f Terraform/docker-compose.yml up -d
                     sleep 30
                 '''
             }
@@ -109,7 +88,6 @@ pipeline {
                             if curl -s -f http://localhost:5000/login > /dev/null; then
                                 echo "✅ Aplicación Flask respondiendo"
                                 
-                                # Probar que la base de datos funciona haciendo una consulta simple
                                 if curl -s http://localhost:5000/register | grep -q "Register"; then
                                     echo "✅ Formulario de registro accesible"
                                     echo "🎉 Todas las pruebas pasaron correctamente"
@@ -133,8 +111,7 @@ pipeline {
         always {
             sh '''
                 echo "=== Limpiando entorno de desarrollo ==="
-                docker-compose down || true
-                # Limpiar recursos Docker
+                docker-compose -f Terraform/docker-compose.yml down || true
                 docker system prune -f || true
             '''
             cleanWs()
@@ -146,11 +123,12 @@ pipeline {
             echo "❌ Pipeline FALLÓ - Revisar logs de test"
             sh '''
                 echo "=== Últimos logs de MySQL ==="
-                docker-compose -f docker-compose.test.yml logs test-mysql | tail -30 || true
+                docker-compose -f Terraform/docker-compose.test.yml logs test-mysql | tail -30 || true
                 echo "=== Últimos logs de Test Web ==="
-                docker-compose -f docker-compose.test.yml logs test-web | tail -30 || true
+                docker-compose -f Terraform/docker-compose.test.yml logs test-web | tail -30 || true
             '''
         }
     }
 }
+
 
