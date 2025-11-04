@@ -12,11 +12,23 @@ services:
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - test-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   test-redis:
     image: redis:7-alpine
     networks:
       - test-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
 
   test-web:
     build: ./app
@@ -30,14 +42,17 @@ services:
       REDIS_PORT: 6379
       SECRET_KEY: "test_key"
     depends_on:
-      - test-mysql
-      - test-redis
+      test-mysql:
+        condition: service_healthy
+      test-redis:
+        condition: service_healthy
     networks:
       - test-network
     command: >
-      sh -c "python wait_for_db.py --host test-mysql --port 3306 --user appuser --password apppassword --database appdb --timeout 30 &&
+      sh -c "python wait_for_db.py --host test-mysql --port 3306 --user appuser --password apppassword --database appdb --timeout 60 &&
              python -m pytest tests/ -v"
 
 networks:
   test-network:
     driver: bridge
+
