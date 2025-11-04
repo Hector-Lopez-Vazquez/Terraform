@@ -18,23 +18,13 @@ pipeline {
                 '''
             }
         }
-        
-        stage('Debug Workspace') {
-            steps {
-                sh '''
-                    echo "=== Mostrando contenido completo del workspace ==="
-                    pwd
-                    ls -R
-                '''
-            }
-        }
- 
+
         stage('Build') {
             steps {
                 sh 'docker-compose -f docker-compose.test.yml build --no-cache'
             }
         }
-        
+
         stage('Start Test Infrastructure') {
             steps {
                 sh '''
@@ -48,7 +38,7 @@ pipeline {
                 '''
             }
         }
-        
+
         stage('Run Tests') {
             steps {
                 sh '''
@@ -69,7 +59,7 @@ pipeline {
                 }
             }
         }
-        
+
         stage('Deploy to Development') {
             when {
                 expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
@@ -83,7 +73,7 @@ pipeline {
                 '''
             }
         }
-        
+
         stage('Integration Test') {
             when {
                 expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
@@ -138,5 +128,6 @@ pipeline {
         }
     }
 }
+
 
 
