@@ -13,47 +13,23 @@ pipeline {
             }
         }
 
-        stage('Levantar servicios') {
+        stage('Levantar y testear') {
             steps {
-                echo "🚀 Levantando contenedores de test..."
+                echo "🚀 Levantando servicios y ejecutando tests en test-web..."
                 sh """
+                    # Limpiar cualquier contenedor previo
                     docker-compose -f $COMPOSE_FILE down -v
-                    docker-compose -f $COMPOSE_FILE up -d
+
+                    # Levantar los contenedores (test-web correrá pytest al iniciar)
+                    docker-compose -f $COMPOSE_FILE up --abort-on-container-exit
                 """
             }
         }
 
-        stage('Esperar servicios') {
+        stage('Mostrar logs finales') {
             steps {
-                echo "⏳ Esperando que MySQL y Redis estén listos..."
-                sh """
-                    # Esperar MySQL
-                    docker-compose -f $COMPOSE_FILE exec -T test-mysql \
-                        bash -c 'until mysqladmin ping -h localhost --silent; do sleep 2; done'
-                    
-                    # Esperar Redis
-                    docker-compose -f $COMPOSE_FILE exec -T test-redis \
-                        bash -c 'until redis-cli ping | grep PONG; do sleep 2; done'
-                """
-            }
-        }
-
-        stage('Ejecutar tests') {
-            steps {
-                echo "🧪 Ejecutando tests de Flask..."
-                sh """
-                    docker-compose -f $COMPOSE_FILE exec -T test-web \
-                        python -m pytest tests/ -v
-                """
-            }
-        }
-
-        stage('Logs finales') {
-            steps {
-                echo "📋 Últimos logs de MySQL"
+                echo "📋 Últimos logs de MySQL y test-web"
                 sh "docker-compose -f $COMPOSE_FILE logs test-mysql | tail -30"
-
-                echo "📋 Últimos logs de Test Web"
                 sh "docker-compose -f $COMPOSE_FILE logs test-web | tail -30"
             }
         }
@@ -74,6 +50,7 @@ pipeline {
         }
     }
 }
+
 
 
 
