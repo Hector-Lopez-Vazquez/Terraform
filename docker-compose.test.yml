@@ -8,28 +8,15 @@ services:
       MYSQL_DATABASE: appdb
       MYSQL_USER: appuser
       MYSQL_PASSWORD: apppassword
-    volumes:
-      - mysql-data:/var/lib/mysql   # Volumen Docker, fuera del workspace
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    # volumes:
+    #   - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql  # COMENTAR ESTA LÍNEA
     networks:
       - test-network
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
 
   test-redis:
     image: redis:7-alpine
     networks:
       - test-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
 
   test-web:
     build: ./app
@@ -43,21 +30,15 @@ services:
       REDIS_PORT: 6379
       SECRET_KEY: "test_key"
     depends_on:
-      test-mysql:
-        condition: service_healthy
-      test-redis:
-        condition: service_healthy
+      - test-mysql
+      - test-redis
     networks:
       - test-network
     command: >
-      sh -c "python wait_for_db.py --host test-mysql --port 3306 --user appuser --password apppassword --database appdb --timeout 60 &&
+      sh -c "python wait_for_db.py --host test-mysql --port 3306 --user appuser --password apppassword --database appdb --timeout 30 &&
              python -m pytest tests/ -v"
-
-volumes:
-  mysql-data:
 
 networks:
   test-network:
     driver: bridge
-
 
