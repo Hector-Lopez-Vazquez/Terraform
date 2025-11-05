@@ -72,15 +72,11 @@ pipeline {
                 always {
                     sh '''
                         echo "=== Limpiando entorno de test ==="
-                        if [ -f "docker-compose.test.yml" ]; then
-                            docker-compose -f docker-compose.test.yml down || true
-                            docker-compose -f docker-compose.test.yml logs --no-color > test_logs.txt 2>&1 || true
-                        else
-                            echo "⚠️ docker-compose.test.yml no existe, omitiendo limpieza."
-                            echo "No se generaron logs de test." > test_logs.txt
-                        fi
+                        docker-compose -f docker-compose.test.yml down
+                        # Guardar logs para diagnóstico
+                        docker-compose -f docker-compose.test.yml logs --no-color > test_logs.txt 2>&1 || true
                         echo "=== Logs de test guardados ==="
-                        tail -50 test_logs.txt
+                        cat test_logs.txt | tail -50
                     '''
                     archiveArtifacts artifacts: 'test_logs.txt', allowEmptyArchive: true
                 }
@@ -150,18 +146,13 @@ pipeline {
             echo "❌ Pipeline FALLÓ - Revisar logs de test"
             sh '''
                 echo "=== Últimos logs de MySQL ==="
-                if [ -f "docker-compose.test.yml" ]; then
-                    docker-compose -f docker-compose.test.yml logs test-mysql | tail -30 || true
-                    echo "=== Últimos logs de Test Web ==="
-                    docker-compose -f docker-compose.test.yml logs test-web | tail -30 || true
-                else
-                    echo "⚠️ No se pudo obtener logs: docker-compose.test.yml no existe"
-                fi
+                docker-compose -f docker-compose.test.yml logs test-mysql | tail -30 || true
+                echo "=== Últimos logs de Test Web ==="
+                docker-compose -f docker-compose.test.yml logs test-web | tail -30 || true
             '''
         }
     }
 }
-
 
 
 
