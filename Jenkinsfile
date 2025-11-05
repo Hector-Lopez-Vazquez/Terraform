@@ -73,7 +73,95 @@ pipeline {
                     sh '''
                         echo "=== Limpiando entorno de test ==="
                         if [ -f "docker-compose.test.yml" ]; then
-                            docker-c
+                            docker-compose -f docker-compose.test.yml down || true
+                            docker-compose -f docker-compose.test.yml logs --no-color > test_logs.txt 2>&1 || true
+                        else
+                            echo "⚠️ docker-compose.test.yml no existe, omitiendo limpieza."
+                            echo "No se generaron logs de test." > test_logs.txt
+                        fi
+                        echo "=== Logs de test guardados ==="
+                        tail -50 test_logs.txt
+                    '''
+                    archiveArtifacts artifacts: 'test_logs.txt', allowEmptyArchive: true
+                }
+            }
+        }
+        
+        stage('Deploy to Development') {
+            when {
+                expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
+            }
+            steps {
+                sh '''
+                    echo "=== Desplegando entorno de desarrollo ==="
+                    docker-compose down || true
+                    docker-compose up -d
+                    sleep 30
+                '''
+            }
+        }
+        
+        stage('Integration Test') {
+            when {
+                expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
+            }
+            steps {
+                sh '''
+                    echo "=== Realizando pruebas de integración ==="
+                    timeout time: 90, unit: 'SECONDS', activity: true {
+                        while true; do
+                            if curl -s -f http://localhost:5000/login > /dev/null; then
+                                echo "✅ Aplicación Flask respondiendo"
+                                
+                                # Probar que la base de datos funciona haciendo una consulta simple
+                                if curl -s http://localhost:5000/register | grep -q "Register"; then
+                                    echo "✅ Formulario de registro accesible"
+                                    echo "🎉 Todas las pruebas pasaron correctamente"
+                                    break
+                                else
+                                    echo "⏳ Esperando que todos los servicios estén listos..."
+                                    sleep 10
+                                fi
+                            else
+                                echo "⏳ Esperando que la aplicación esté lista..."
+                                sleep 10
+                            fi
+                        done
+                    }
+                '''
+            }
+        }
+    }
+    
+    post {
+        always {
+            sh '''
+                echo "=== Limpiando entorno de desarrollo ==="
+                docker-compose down || true
+                # Limpiar recursos Docker
+                docker system prune -f || true
+            '''
+            cleanWs()
+        }
+        success {
+            echo "🎉 Pipeline COMPLETADO EXITOSAMENTE"
+        }
+        failure {
+            echo "❌ Pipeline FALLÓ - Revisar logs de test"
+            sh '''
+                echo "=== Últimos logs de MySQL ==="
+                if [ -f "docker-compose.test.yml" ]; then
+                    docker-compose -f docker-compose.test.yml logs test-mysql | tail -30 || true
+                    echo "=== Últimos logs de Test Web ==="
+                    docker-compose -f docker-compose.test.yml logs test-web | tail -30 || true
+                else
+                    echo "⚠️ No se pudo obtener logs: docker-compose.test.yml no existe"
+                fi
+            '''
+        }
+    }
+}
+
 
 
 
