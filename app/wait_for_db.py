@@ -38,4 +38,4 @@ while True:
         if attempt % 5 == 0:  # Log cada 5 intentos
             print(f"⏳ Intento {attempt}, {elapsed:.1f}s: {str(e)}")
         
-        time.sleep(2)  # Aumentar sleep a 2 segundos
+        time.sleep(2)  # Aumentar sleep a 2 segundos 
